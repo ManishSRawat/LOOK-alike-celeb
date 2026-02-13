@@ -28,51 +28,43 @@ if not hasattr(keras_utils.layer_utils, 'get_source_inputs'):
         except ImportError:
             pass
 
-# Patch keras-vggface for Keras 3.x compatibility (layer names cannot contain '/')
-def patch_keras_vggface():
-    """Patch keras-vggface models.py to replace '/' with '_' in layer names for Keras 3.x compatibility"""
+# Monkey-patch Keras layers for Keras 3.x compatibility (layer names cannot contain '/')
+# This approach works on read-only file systems like Streamlit Cloud
+def patch_layer_names():
+    """Monkey-patch Keras layer classes to automatically fix layer names with '/' characters"""
     try:
-        import keras_vggface
-        import os
-        import re
+        from keras.src.layers.layer import Layer
+        from keras.src.ops.operation import Operation
         
-        # Find the models.py file
-        vggface_path = os.path.dirname(keras_vggface.__file__)
-        models_file = os.path.join(vggface_path, 'models.py')
+        # Store original __init__ methods
+        original_layer_init = Layer.__init__
+        original_operation_init = Operation.__init__
         
-        if not os.path.exists(models_file):
-            return False
-            
-        # Read the file
-        with open(models_file, 'r', encoding='utf-8') as f:
-            content = f.read()
+        # Wrapper for Layer.__init__ to fix names
+        def patched_layer_init(self, *args, **kwargs):
+            if 'name' in kwargs and kwargs['name'] and '/' in kwargs['name']:
+                kwargs['name'] = kwargs['name'].replace('/', '_')
+            original_layer_init(self, *args, **kwargs)
         
-        # Check if already patched
-        if 'conv1_7x7_s2' in content and 'conv1/7x7_s2' not in content:
-            return True  # Already patched
+        # Wrapper for Operation.__init__ to fix names
+        def patched_operation_init(self, *args, **kwargs):
+            if 'name' in kwargs and kwargs['name'] and '/' in kwargs['name']:
+                kwargs['name'] = kwargs['name'].replace('/', '_')
+            elif args and len(args) > 0 and isinstance(args[0], str) and '/' in args[0]:
+                args = (args[0].replace('/', '_'),) + args[1:]
+            original_operation_init(self, *args, **kwargs)
         
-        # Replace all '/' with '_' in layer names
-        # Pattern: name='something/something' or name="something/something"
-        pattern = r"name=(['\"])([^'\"]*)/([^'\"]*)\1"
-        
-        # Keep replacing until no more matches
-        while re.search(pattern, content):
-            content = re.sub(pattern, lambda m: f"name={m.group(1)}{m.group(2)}_{m.group(3)}{m.group(1)}", content)
-        
-        # Also handle concatenated strings like: + "/bn"
-        content = re.sub(r'\+ \"(/[^\"]*)\"', lambda m: f'+ "{m.group(1).replace("/", "_")}"', content)
-        
-        # Write back
-        with open(models_file, 'w', encoding='utf-8') as f:
-            f.write(content)
+        # Apply patches
+        Layer.__init__ = patched_layer_init
+        Operation.__init__ = patched_operation_init
         
         return True
     except Exception as e:
-        print(f"Warning: Could not patch keras-vggface: {e}")
+        print(f"Warning: Could not monkey-patch Keras layers: {e}")
         return False
 
-# Apply the patch before importing VGGFace
-patch_keras_vggface()
+# Apply the monkey-patch before importing VGGFace
+patch_layer_names()
 
 from keras_vggface.utils import preprocess_input
 from keras_vggface.vggface import VGGFace
