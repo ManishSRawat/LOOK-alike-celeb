@@ -1,4 +1,34 @@
 ﻿import sys
+
+# CRITICAL: Monkey-patch Keras BEFORE any imports to fix layer names with '/' for Keras 3.x
+# This must be done first before tensorflow/keras imports anything
+def patch_keras_operation():
+    """Intercept Keras Operation class to automatically fix layer names"""
+    try:
+        # Import and patch Operation class
+        from keras.src.ops.operation import Operation
+        
+        # Store the original __init__
+        _original_init = Operation.__init__
+        
+        # Create wrapper that fixes names
+        def _patched_init(self, name=None, **kwargs):
+            # Fix name if it contains '/'
+            if name and isinstance(name, str) and '/' in name:
+                name = name.replace('/', '_')
+            # Call original with fixed name
+            _original_init(self, name=name, **kwargs)
+        
+        # Apply the patch
+        Operation.__init__ = _patched_init
+        return True
+    except Exception as e:
+        print(f"Warning: Could not patch Keras Operation: {e}")
+        return False
+
+# Apply patch immediately
+patch_keras_operation()
+
 from tensorflow.keras import utils as keras_utils
 import types
 
@@ -27,44 +57,6 @@ if not hasattr(keras_utils.layer_utils, 'get_source_inputs'):
             keras_utils.layer_utils.get_source_inputs = get_source_inputs
         except ImportError:
             pass
-
-# Monkey-patch Keras layers for Keras 3.x compatibility (layer names cannot contain '/')
-# This approach works on read-only file systems like Streamlit Cloud
-def patch_layer_names():
-    """Monkey-patch Keras layer classes to automatically fix layer names with '/' characters"""
-    try:
-        from keras.src.layers.layer import Layer
-        from keras.src.ops.operation import Operation
-        
-        # Store original __init__ methods
-        original_layer_init = Layer.__init__
-        original_operation_init = Operation.__init__
-        
-        # Wrapper for Layer.__init__ to fix names
-        def patched_layer_init(self, *args, **kwargs):
-            if 'name' in kwargs and kwargs['name'] and '/' in kwargs['name']:
-                kwargs['name'] = kwargs['name'].replace('/', '_')
-            original_layer_init(self, *args, **kwargs)
-        
-        # Wrapper for Operation.__init__ to fix names
-        def patched_operation_init(self, *args, **kwargs):
-            if 'name' in kwargs and kwargs['name'] and '/' in kwargs['name']:
-                kwargs['name'] = kwargs['name'].replace('/', '_')
-            elif args and len(args) > 0 and isinstance(args[0], str) and '/' in args[0]:
-                args = (args[0].replace('/', '_'),) + args[1:]
-            original_operation_init(self, *args, **kwargs)
-        
-        # Apply patches
-        Layer.__init__ = patched_layer_init
-        Operation.__init__ = patched_operation_init
-        
-        return True
-    except Exception as e:
-        print(f"Warning: Could not monkey-patch Keras layers: {e}")
-        return False
-
-# Apply the monkey-patch before importing VGGFace
-patch_layer_names()
 
 from keras_vggface.utils import preprocess_input
 from keras_vggface.vggface import VGGFace
