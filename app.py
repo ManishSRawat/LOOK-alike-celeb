@@ -28,6 +28,52 @@ if not hasattr(keras_utils.layer_utils, 'get_source_inputs'):
         except ImportError:
             pass
 
+# Patch keras-vggface for Keras 3.x compatibility (layer names cannot contain '/')
+def patch_keras_vggface():
+    """Patch keras-vggface models.py to replace '/' with '_' in layer names for Keras 3.x compatibility"""
+    try:
+        import keras_vggface
+        import os
+        import re
+        
+        # Find the models.py file
+        vggface_path = os.path.dirname(keras_vggface.__file__)
+        models_file = os.path.join(vggface_path, 'models.py')
+        
+        if not os.path.exists(models_file):
+            return False
+            
+        # Read the file
+        with open(models_file, 'r', encoding='utf-8') as f:
+            content = f.read()
+        
+        # Check if already patched
+        if 'conv1_7x7_s2' in content and 'conv1/7x7_s2' not in content:
+            return True  # Already patched
+        
+        # Replace all '/' with '_' in layer names
+        # Pattern: name='something/something' or name="something/something"
+        pattern = r"name=(['\"])([^'\"]*)/([^'\"]*)\1"
+        
+        # Keep replacing until no more matches
+        while re.search(pattern, content):
+            content = re.sub(pattern, lambda m: f"name={m.group(1)}{m.group(2)}_{m.group(3)}{m.group(1)}", content)
+        
+        # Also handle concatenated strings like: + "/bn"
+        content = re.sub(r'\+ \"(/[^\"]*)\"', lambda m: f'+ "{m.group(1).replace("/", "_")}"', content)
+        
+        # Write back
+        with open(models_file, 'w', encoding='utf-8') as f:
+            f.write(content)
+        
+        return True
+    except Exception as e:
+        print(f"Warning: Could not patch keras-vggface: {e}")
+        return False
+
+# Apply the patch before importing VGGFace
+patch_keras_vggface()
+
 from keras_vggface.utils import preprocess_input
 from keras_vggface.vggface import VGGFace
 import pickle
